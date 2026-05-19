@@ -5,6 +5,7 @@ import orderRoutes from './orderRoutes.js';
 import configuratorRoutes from './configuratorRoutes.js';
 import artworkRoutes from './artworkRoutes.js';
 import quoteRoutes from './quoteRoutes.js';
+import paymentRoutes from './paymentRoutes.js';
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use('/orders', orderRoutes);
 router.use('/configurator', configuratorRoutes);
 router.use('/artwork', artworkRoutes);
 router.use('/quotes', quoteRoutes);
+router.use('/payments', paymentRoutes);
 
 export default router;
