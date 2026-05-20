@@ -3,6 +3,8 @@ import { ptQuotes } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { success, error } from '../utils/apiResponse.js';
 import { chargeCard } from '../utils/cybersource.js';
+import { sendMail, invoiceEmailHtml } from '../utils/mailer.js';
+import { generateInvoicePdfBuffer } from '../utils/invoicePdf.js';
 
 export async function processCardPayment(req, res, next) {
   try {
@@ -66,6 +68,31 @@ export async function processCardPayment(req, res, next) {
         paymentDate:      today,
         paymentMethod:    `Credit Card (${cardType || 'Card'})`,
       }).where(eq(ptQuotes.id, quoteId));
+
+      // Send invoice email to delivery email
+      const toEmail = billing.email;
+      if (toEmail) {
+        try {
+          const paidOrder = { ...quote, paymentStatus: 'Paid' };
+          const total     = Number(quote.paymentAmount ?? 0).toFixed(2);
+          const pdfBuffer = await generateInvoicePdfBuffer(paidOrder);
+          console.log('[processCardPayment] invoice PDF buffer size:', pdfBuffer?.length);
+          await sendMail({
+            to:          toEmail,
+            subject:     `Confirmed Order | reference #${quoteId}`,
+            html:        invoiceEmailHtml({ firstName: billing.firstName || '', quoteId, total, isPaid: true }),
+            attachments: [{
+              filename:    `Invoice-${quoteId}.pdf`,
+              content:     pdfBuffer.toString('base64'),
+              encoding:    'base64',
+              contentType: 'application/pdf',
+            }],
+          });
+          console.log('[processCardPayment] invoice email sent to:', toEmail);
+        } catch (emailErr) {
+          console.error('[processCardPayment] invoice email failed:', emailErr?.message ?? emailErr);
+        }
+      }
 
       return success(res, { transactionId: result.transactionId, status: 'paid' });
     }

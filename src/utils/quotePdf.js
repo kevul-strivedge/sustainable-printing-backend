@@ -30,13 +30,7 @@ function formatDate(d) {
   return `${dd}-${mm}-${yyyy}`;
 }
 
-export function buildQuotePdf(order, res) {
-  const doc = new PDFDocument({ size: 'A4', margin: 0 });
-
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="Quote-${order.id}.pdf"`);
-  doc.pipe(res);
-
+function _populateQuote(doc, order) {
   // ── Header ─────────────────────────────────────────────────────────────────
   doc.image(LOGO_PATH, 40, 30, { width: 90 });
 
@@ -46,10 +40,8 @@ export function buildQuotePdf(order, res) {
   doc.font('Helvetica').fontSize(10).fillColor(TEXT)
     .text(`Ref No. :${order.id}`, 350, 64, { align: 'right', width: 205 });
 
-  // ── Rule under header ───────────────────────────────────────────────────────
   rule(doc, 100);
 
-  // ── Date / To / Attention ───────────────────────────────────────────────────
   const delivery = (() => {
     try { return JSON.parse(order.deliveryDetails ?? '{}'); } catch { return {}; }
   })();
@@ -61,7 +53,6 @@ export function buildQuotePdf(order, res) {
 
   const dateStr = formatDate(order.created);
 
-  // Labels in the Date/To/Attention section are dark olive/teal per the design
   const infoLabel = (label, value, y) => {
     doc.font('Helvetica-Bold').fontSize(10).fillColor('#4a7c59').text(label, 40, y);
     doc.font('Helvetica-Bold').fontSize(10).fillColor(TEXT).text(String(value ?? ''), 220, y);
@@ -73,10 +64,9 @@ export function buildQuotePdf(order, res) {
 
   rule(doc, 172);
 
-  // ── Order details ───────────────────────────────────────────────────────────
-  const suburb   = delivery.suburb  || order.member?.suburb  || '';
-  const state    = delivery.state   || order.member?.state   || '';
-  const address  = delivery.address || order.member?.address || '';
+  const suburb      = delivery.suburb  || order.member?.suburb  || '';
+  const state       = delivery.state   || order.member?.state   || '';
+  const address     = delivery.address || order.member?.address || '';
   const deliveryStr = [address, suburb, state].filter(Boolean).join(', ') || '—';
 
   const artworkLabel =
@@ -105,7 +95,6 @@ export function buildQuotePdf(order, res) {
   rule(doc, y + 6);
   y += 18;
 
-  // ── Quantity and Price ──────────────────────────────────────────────────────
   doc.font('Helvetica-Bold').fontSize(11).fillColor(GREEN)
     .text('Quantity and Price', 40, y);
   y += 16;
@@ -113,7 +102,6 @@ export function buildQuotePdf(order, res) {
   rule(doc, y);
   y += 12;
 
-  // Table header
   const col = { type: 40, price: 250, gst: 370, total: 460 };
   doc.font('Helvetica-Bold').fontSize(10).fillColor(GREEN);
   doc.text('Printing type', col.type,  y);
@@ -122,7 +110,6 @@ export function buildQuotePdf(order, res) {
   doc.text('Total Price',   col.total, y);
   y += 18;
 
-  // Build split rows — prefer stored splits JSON; fall back to single row
   const storedSplits = (() => {
     try { return JSON.parse(order.summary ?? '{}').splits ?? null; } catch { return null; }
   })();
@@ -149,19 +136,16 @@ export function buildQuotePdf(order, res) {
   }
   y += 6;
 
-  // Notes
   doc.font('Helvetica-Bold').fontSize(10).fillColor(GREEN).text('Notes', 40, y);
   y += 20;
 
   rule(doc, y);
   y += 14;
 
-  // ── Valid for ───────────────────────────────────────────────────────────────
   doc.font('Helvetica-BoldOblique').fontSize(10).fillColor(GREEN)
     .text('Quote Valid for 30 days', 40, y);
   y += 36;
 
-  // ── Footer text ─────────────────────────────────────────────────────────────
   doc.font('Helvetica-Bold').fontSize(10).fillColor(GREEN);
   doc.text('Thank you for your quote request.', 40, y); y += 20;
   doc.text(
@@ -171,11 +155,29 @@ export function buildQuotePdf(order, res) {
   doc.text('Kind regards', 40, y); y += 18;
   doc.text('Sustainable Printing Co.', 40, y); y += 36;
 
-  // ── Green footer bar ────────────────────────────────────────────────────────
   const pageH = doc.page.height;
   doc.rect(0, pageH - 50, doc.page.width, 50).fill(GREEN_DARK);
   doc.font('Helvetica').fontSize(12).fillColor('#ffffff')
     .text('sustainableprintingco.com.au', 0, pageH - 33, { align: 'center', width: doc.page.width });
+}
 
+export function buildQuotePdf(order, res) {
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Quote-${order.id}.pdf"`);
+  doc.pipe(res);
+  _populateQuote(doc, order);
   doc.end();
+}
+
+export function generateQuotePdfBuffer(order) {
+  return new Promise((resolve, reject) => {
+    const doc    = new PDFDocument({ size: 'A4', margin: 0 });
+    const chunks = [];
+    doc.on('data',  (c) => chunks.push(c));
+    doc.on('end',   ()  => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    _populateQuote(doc, order);
+    doc.end();
+  });
 }

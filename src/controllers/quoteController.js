@@ -3,8 +3,9 @@ import { ptMembers, ptQuotes, ptQuoteArtworks, ptProducts } from '../db/schema.j
 import { eq, desc, count } from 'drizzle-orm';
 import { success, error } from '../utils/apiResponse.js';
 import jwt from 'jsonwebtoken';
-import { sendMail } from '../utils/mailer.js';
+import { sendMail, invoiceEmailHtml } from '../utils/mailer.js';
 import { buildQuotePdf } from '../utils/quotePdf.js';
+import { buildInvoicePdf, generateInvoicePdfBuffer } from '../utils/invoicePdf.js';
 
 export async function getQuote(req, res, next) {
   try {
@@ -204,6 +205,49 @@ export async function submitQuote(req, res) {
         selectedArtwork: 1,
         selectedProof:   0,
       });
+    }
+
+    // 4. Send invoice email for bank transfer only — card payment emails are sent by paymentController after authorization
+    if (email && paymentMethod === 'bank') {
+      const orderForPdf = {
+        id:             quoteId,
+        quantity:       quantity ?? 0,
+        kind:           kind ?? 1,
+        format:         formatLabel || '',
+        stock:          stockLabel  || '',
+        ink:            printingType || '',
+        finish:         extrasLabel  || '',
+        printingPrice:  printingPrice ?? 0,
+        deliveryPrice:  deliveryPrice ?? 0,
+        paymentAmount:  paymentAmount ?? 0,
+        paymentStatus:  'Unpaid',
+        artworkStatus:  artworkFileUrl ? 'uploaded' : (artworkMethod === 'upload-later' ? 'pending' : 'no_artwork'),
+        created:        now,
+        postcode:       postcode || '',
+        deliveryDetails: deliverySnapshot,
+        summary:        splits?.length ? JSON.stringify({ splits }) : null,
+        member:         null,
+      };
+
+      try {
+        const total     = Number(paymentAmount ?? 0).toFixed(2);
+        const pdfBuffer = await generateInvoicePdfBuffer(orderForPdf);
+        console.log('[submitQuote] invoice PDF buffer size:', pdfBuffer?.length);
+        await sendMail({
+          to:          email,
+          subject:     `Confirmed Order | reference #${quoteId}`,
+          html:        invoiceEmailHtml({ firstName, quoteId, total, isPaid: false }),
+          attachments: [{
+            filename:    `Invoice-${quoteId}.pdf`,
+            content:     pdfBuffer.toString('base64'),
+            encoding:    'base64',
+            contentType: 'application/pdf',
+          }],
+        });
+        console.log('[submitQuote] invoice email sent to:', email);
+      } catch (emailErr) {
+        console.error('[submitQuote] invoice email failed:', emailErr?.message ?? emailErr);
+      }
     }
 
     return res.json({ success: true, quoteId });
@@ -409,6 +453,9 @@ export async function sendQuoteEmail(req, res, next) {
       return error(res, 'Subject and message are required', 400);
     }
 
+    const adminEmail = process.env.ADMIN_EMAIL;
+    if (!adminEmail) return error(res, 'Server configuration error', 500);
+
     const rows = await db
       .select({ memberId: ptQuotes.memberId, deliveryDetails: ptQuotes.deliveryDetails })
       .from(ptQuotes)
@@ -417,26 +464,51 @@ export async function sendQuoteEmail(req, res, next) {
     if (!rows.length) return error(res, 'Order not found', 404);
     if (Number(rows[0].memberId) !== Number(memberId)) return error(res, 'Unauthorized', 403);
 
-    // Prefer the billing email captured at order time over the account email
-    let toEmail = null;
+    // Resolve the customer's name + email to include in the email body for admin context
+    let customerName  = '';
+    let customerEmail = '';
     try {
       const d = JSON.parse(rows[0].deliveryDetails ?? '{}');
-      toEmail = d.email || null;
+      customerName  = [d.firstName, d.lastName].filter(Boolean).join(' ');
+      customerEmail = d.email ?? '';
     } catch { /* fall through */ }
 
-    if (!toEmail) {
+    if (!customerEmail) {
       const memberRows = await db
-        .select({ email: ptMembers.email })
+        .select({ email: ptMembers.email, firstName: ptMembers.firstName, lastName: ptMembers.lastName })
         .from(ptMembers)
         .where(eq(ptMembers.id, memberId));
-      toEmail = memberRows[0]?.email ?? null;
+      customerEmail = memberRows[0]?.email ?? '';
+      if (!customerName) customerName = [memberRows[0]?.firstName, memberRows[0]?.lastName].filter(Boolean).join(' ');
     }
 
-    if (!toEmail) return error(res, 'No email address on file', 400);
+    const fullMessage = `${message}\n\n---\nSent by: ${customerName || 'Customer'}${customerEmail ? ` <${customerEmail}>` : ''}\nQuote ID: #${quoteId}`;
 
-    await sendMail({ to: toEmail, subject, text: message });
+    await sendMail({ to: adminEmail, subject, text: fullMessage });
 
     return success(res, null, 'Email sent successfully');
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function downloadInvoicePdf(req, res, next) {
+  try {
+    const id       = Number(req.params.id);
+    const memberId = req.user.id;
+
+    const rows = await db
+      .select()
+      .from(ptQuotes)
+      .leftJoin(ptMembers, eq(ptQuotes.memberId, ptMembers.id))
+      .where(eq(ptQuotes.id, id));
+
+    if (!rows.length) return error(res, 'Order not found', 404);
+
+    const { pt_quotes: q, pt_members: m } = rows[0];
+    if (Number(q.memberId) !== Number(memberId)) return error(res, 'Unauthorized', 403);
+
+    buildInvoicePdf({ ...q, member: m }, res);
   } catch (err) {
     next(err);
   }
