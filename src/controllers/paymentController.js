@@ -35,6 +35,8 @@ export async function processCardPayment(req, res, next) {
       billing = JSON.parse(quote.deliveryDetails ?? '{}');
     } catch { /* fall back to empty */ }
 
+    console.log('[Payment] quoteId:', quoteId, '| DB paymentAmount:', quote.paymentAmount, '| type:', typeof quote.paymentAmount);
+
     const result = await chargeCard({
       amount:        quote.paymentAmount ?? 0,
       billing:       {

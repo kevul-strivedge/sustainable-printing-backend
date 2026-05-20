@@ -65,6 +65,7 @@ export async function getQuote(req, res, next) {
 
 export async function submitQuote(req, res) {
   try {
+    console.log('[submitQuote] paymentAmount from frontend:', req.body.paymentAmount, '| printingPrice:', req.body.printingPrice, '| deliveryPrice:', req.body.deliveryPrice);
     const {
       productDbId,
       kind,
