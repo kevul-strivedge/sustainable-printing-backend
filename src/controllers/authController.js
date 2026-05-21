@@ -18,12 +18,30 @@ export const register = async (req, res, next) => {
     const hashed = await bcrypt.hash(password, 12);
     const fullName = `${first_name} ${last_name}`.trim();
 
+    const now = new Date();
     const [result] = await db.insert(ptMembers).values({
       firstName: first_name,
       lastName: last_name,
       name: fullName,
       email,
       password: hashed,
+      status: 'Pending',
+      contactType: 'sustainableprintingco',
+      // NOT NULL columns with no DEFAULT in the actual table
+      invoiceBusinessname: '',
+      invoiceFirstName: '',
+      invoiceLastName: '',
+      invoiceAddress: '',
+      invoiceSuburb: '',
+      invoiceState: '',
+      invoicePostcode: '',
+      invoiceEmail: '',
+      invoicePhone: '',
+      invoiceMobile: '',
+      passwordToken: '',
+      rememberToken: '',
+      // updatedAt DEFAULT '0000-00-00 00:00:00' is rejected by NO_ZERO_DATE strict mode
+      updatedAt: now,
     });
 
     const token = generateToken(result.insertId);
