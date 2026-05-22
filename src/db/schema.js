@@ -294,6 +294,16 @@ export const ptQuoteArtworks = mysqlTable('pt_quote_artworks', {
   selectedProof:   tinyint('selected_proof').notNull().default(0),
 });
 
+// ─── Standardised Quantity Tiers ──────────────────────────────────────────────
+// pt_quantities is a flat global lookup (id → quantity) — distinct from
+// pt_product_quantities which is per-product. pt_finish_prices.quantity_id
+// references THIS table (a quantity tier shared across all products).
+
+export const ptQuantities = mysqlTable('pt_quantities', {
+  id:       int('id').autoincrement().primaryKey(),
+  quantity: int('quantity').notNull().default(0),
+});
+
 // ─── Portfolio ────────────────────────────────────────────────────────────────
 // One row per product variant (e.g. Uncoated business cards vs Brown Kraft business
 // cards both link to parent_product_id = 2). Carries the marketing title/description

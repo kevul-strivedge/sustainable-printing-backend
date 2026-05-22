@@ -1,7 +1,7 @@
 import { db } from '../config/db.js';
 import {
   ptProductFinishes, ptFinishTypes, ptFinishPrices,
-  ptProductPricing, ptProductQuantities,
+  ptProductPricing, ptProductQuantities, ptQuantities,
   ptPaperTypes, ptFormats, ptInks, ptPortfolio,
 } from '../db/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
@@ -134,19 +134,23 @@ export const getProductConfig = async (req, res, next) => {
         .where(inArray(ptProductQuantities.productId, productIds))
         .orderBy(ptProductQuantities.kind, ptProductQuantities.quantity),
 
-      // Finish prices keyed by (finishId, quantity) for these products' quantities
-      db.selectDistinct({
+      // Finish prices — pt_finish_prices.quantity_id references pt_quantities (a global
+      // tier table), NOT pt_product_quantities. Joining the wrong table made our query
+      // return product-pricing IDs that happened to share numeric IDs for qty 100–500
+      // but diverged at qty 750+ (e.g. pt_quantities.id=4 = qty 750 vs
+      // pt_product_quantities.id=4 = product 15 / kind=1 / qty 1000). The frontend then
+      // picks "highest tier ≤ qty" — matches Laravel ProductController.php:1553-1597.
+      db.select({
         finishId: ptFinishPrices.finishId,
-        quantity: ptProductQuantities.quantity,
+        quantity: ptQuantities.quantity,
         price:    ptFinishPrices.price,
+        id:       ptFinishPrices.id,
       })
         .from(ptProductFinishes)
-        .innerJoin(ptFinishPrices,       eq(ptProductFinishes.finishId,   ptFinishPrices.finishId))
-        .innerJoin(ptProductQuantities,  eq(ptFinishPrices.quantityId,    ptProductQuantities.id))
-        .where(and(
-          inArray(ptProductFinishes.productId,    productIds),
-          inArray(ptProductQuantities.productId,  productIds),
-        )),
+        .innerJoin(ptFinishPrices, eq(ptProductFinishes.finishId, ptFinishPrices.finishId))
+        .innerJoin(ptQuantities,   eq(ptFinishPrices.quantityId,  ptQuantities.id))
+        .where(inArray(ptProductFinishes.productId, productIds))
+        .orderBy(ptFinishPrices.id),
 
       // Portfolio rows — title/description per product variant, used to swap the
       // product description in the UI when the user picks a different paper type.
