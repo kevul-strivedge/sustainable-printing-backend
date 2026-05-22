@@ -1,10 +1,10 @@
 import { db } from '../config/db.js';
 import {
   ptProductFinishes, ptFinishTypes, ptFinishPrices,
-  ptProductPricing, ptProductQuantities,
-  ptPaperTypes, ptFormats, ptInks,
+  ptProductPricing, ptProductQuantities, ptQuantities,
+  ptPaperTypes, ptFormats, ptInks, ptPortfolio,
 } from '../db/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { success, error } from '../utils/apiResponse.js';
 
 // GET /api/v1/configurator/:productId/config
@@ -15,9 +15,18 @@ export const getProductConfig = async (req, res, next) => {
     const productId = Number(req.params.productId);
     if (isNaN(productId)) return error(res, 'Invalid product ID', 400);
 
-    const [finishing, paper_type, paper_size, front, back, quantity, design_options, quantity_options, pricing_table, finish_prices] = await Promise.all([
+    // Optional ?siblings=17,18 — pull paper/format/pricing data from these product IDs
+    // as well, so a single configurator slug can surface options from related DB products
+    // (mirrors the old Laravel pt_portfolio.parent_product_id sibling lookup).
+    const siblingIds = String(req.query.siblings ?? '')
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0 && n !== productId);
+    const productIds = [productId, ...siblingIds];
 
-      // Finishes available for this product
+    const [finishing, paper_type, paper_size, front, back, quantity, design_options, quantity_options, pricing_table, finish_prices, portfolios] = await Promise.all([
+
+      // Finishes available for these products
       db.select({
         id: ptProductFinishes.id,
         productId: ptProductFinishes.productId,
@@ -29,19 +38,21 @@ export const getProductConfig = async (req, res, next) => {
       })
         .from(ptProductFinishes)
         .innerJoin(ptFinishTypes, eq(ptProductFinishes.finishId, ptFinishTypes.id))
-        .where(eq(ptProductFinishes.productId, productId))
+        .where(inArray(ptProductFinishes.productId, productIds))
         .orderBy(ptFinishTypes.ordering),
 
-      // Distinct paper types (stocks) that have pricing for this product
+      // Distinct paper types (stocks) that have pricing for these products.
+      // productId is included so the frontend can map a chosen paper → its portfolio.
       db.selectDistinct({
         stockId: ptProductPricing.stockId,
         paperName: ptPaperTypes.paperName,
         formatId: ptProductPricing.formatId,
+        productId: ptProductQuantities.productId,
       })
         .from(ptProductPricing)
         .innerJoin(ptProductQuantities, eq(ptProductPricing.productQuantityId, ptProductQuantities.id))
         .innerJoin(ptPaperTypes, eq(ptProductPricing.stockId, ptPaperTypes.id))
-        .where(eq(ptProductQuantities.productId, productId)),
+        .where(inArray(ptProductQuantities.productId, productIds)),
 
       // Distinct sizes (formats) with their associated stock and ink context
       db.selectDistinct({
@@ -55,7 +66,7 @@ export const getProductConfig = async (req, res, next) => {
         .from(ptProductPricing)
         .innerJoin(ptProductQuantities, eq(ptProductPricing.productQuantityId, ptProductQuantities.id))
         .innerJoin(ptFormats, eq(ptProductPricing.formatId, ptFormats.id))
-        .where(eq(ptProductQuantities.productId, productId)),
+        .where(inArray(ptProductQuantities.productId, productIds)),
 
       // Distinct front inks
       db.selectDistinct({
@@ -67,7 +78,7 @@ export const getProductConfig = async (req, res, next) => {
         .from(ptProductPricing)
         .innerJoin(ptProductQuantities, eq(ptProductPricing.productQuantityId, ptProductQuantities.id))
         .innerJoin(ptInks, eq(ptProductPricing.frontInkId, ptInks.id))
-        .where(eq(ptProductQuantities.productId, productId)),
+        .where(inArray(ptProductQuantities.productId, productIds)),
 
       // Distinct back inks
       db.selectDistinct({
@@ -79,7 +90,7 @@ export const getProductConfig = async (req, res, next) => {
         .from(ptProductPricing)
         .innerJoin(ptProductQuantities, eq(ptProductPricing.productQuantityId, ptProductQuantities.id))
         .innerJoin(ptInks, eq(ptProductPricing.backInkId, ptInks.id))
-        .where(eq(ptProductQuantities.productId, productId)),
+        .where(inArray(ptProductQuantities.productId, productIds)),
 
       // Distinct quantity kinds (1 row per kind, showing the associated options)
       db.selectDistinct({
@@ -91,50 +102,71 @@ export const getProductConfig = async (req, res, next) => {
       })
         .from(ptProductPricing)
         .innerJoin(ptProductQuantities, eq(ptProductPricing.productQuantityId, ptProductQuantities.id))
-        .where(eq(ptProductQuantities.productId, productId))
+        .where(inArray(ptProductQuantities.productId, productIds))
         .orderBy(ptProductQuantities.kind),
 
-      // Distinct design counts (kind column) for this product
+      // Distinct design counts (kind column) for these products
       db.selectDistinct({ kind: ptProductQuantities.kind })
         .from(ptProductQuantities)
-        .where(eq(ptProductQuantities.productId, productId))
+        .where(inArray(ptProductQuantities.productId, productIds))
         .orderBy(ptProductQuantities.kind),
 
-      // Distinct quantity-per-design values for this product
+      // Distinct quantity-per-design values for these products
       db.selectDistinct({ quantity: ptProductQuantities.quantity })
         .from(ptProductQuantities)
-        .where(eq(ptProductQuantities.productId, productId))
+        .where(inArray(ptProductQuantities.productId, productIds))
         .orderBy(ptProductQuantities.quantity),
 
-      // Full pricing table — all (kind, quantity, formatId, stockId, price) rows
+      // Full pricing table — all (kind, quantity, formatId, stockId, productId, price, estimatedWeight) rows.
+      // productId is needed so the frontend can distinguish "product 18 + paper 30" from
+      // "product 48 + paper 30" when sibling products share the same paper stock.
       db.select({
-        kind:     ptProductQuantities.kind,
-        quantity: ptProductQuantities.quantity,
-        formatId: ptProductPricing.formatId,
-        stockId:  ptProductPricing.stockId,
-        price:    ptProductPricing.printtogetherPrice,
+        kind:            ptProductQuantities.kind,
+        quantity:        ptProductQuantities.quantity,
+        formatId:        ptProductPricing.formatId,
+        stockId:         ptProductPricing.stockId,
+        productId:       ptProductQuantities.productId,
+        price:           ptProductPricing.printtogetherPrice,
+        estimatedWeight: ptProductPricing.estimatedWeight,
       })
         .from(ptProductPricing)
         .innerJoin(ptProductQuantities, eq(ptProductPricing.productQuantityId, ptProductQuantities.id))
-        .where(eq(ptProductQuantities.productId, productId))
+        .where(inArray(ptProductQuantities.productId, productIds))
         .orderBy(ptProductQuantities.kind, ptProductQuantities.quantity),
 
-      // Finish prices keyed by (finishId, quantity) for this product's quantities
-      db.selectDistinct({
+      // Finish prices — pt_finish_prices.quantity_id references pt_quantities (a global
+      // tier table), NOT pt_product_quantities. Joining the wrong table made our query
+      // return product-pricing IDs that happened to share numeric IDs for qty 100–500
+      // but diverged at qty 750+ (e.g. pt_quantities.id=4 = qty 750 vs
+      // pt_product_quantities.id=4 = product 15 / kind=1 / qty 1000). The frontend then
+      // picks "highest tier ≤ qty" — matches Laravel ProductController.php:1553-1597.
+      db.select({
         finishId: ptFinishPrices.finishId,
-        quantity: ptProductQuantities.quantity,
+        quantity: ptQuantities.quantity,
         price:    ptFinishPrices.price,
+        id:       ptFinishPrices.id,
       })
         .from(ptProductFinishes)
-        .innerJoin(ptFinishPrices,       eq(ptProductFinishes.finishId,   ptFinishPrices.finishId))
-        .innerJoin(ptProductQuantities,  eq(ptFinishPrices.quantityId,    ptProductQuantities.id))
-        .where(and(
-          eq(ptProductFinishes.productId,    productId),
-          eq(ptProductQuantities.productId,  productId),
-        )),
+        .innerJoin(ptFinishPrices, eq(ptProductFinishes.finishId, ptFinishPrices.finishId))
+        .innerJoin(ptQuantities,   eq(ptFinishPrices.quantityId,  ptQuantities.id))
+        .where(inArray(ptProductFinishes.productId, productIds))
+        .orderBy(ptFinishPrices.id),
+
+      // Portfolio rows — title/description per product variant, used to swap the
+      // product description in the UI when the user picks a different paper type.
+      db.select({
+        productId:    ptPortfolio.productId,
+        title:        ptPortfolio.title,
+        title2:       ptPortfolio.title2,
+        description:  ptPortfolio.description,
+        description1: ptPortfolio.description1,
+        description2: ptPortfolio.description2,
+      })
+        .from(ptPortfolio)
+        .where(inArray(ptPortfolio.productId, productIds)),
     ]);
 
-    return success(res, { paper_type, paper_size, front, back, finishing, finish_prices, quantity, design_options, quantity_options, pricing_table });
+    return success(res, { paper_type, paper_size, front, back, finishing, finish_prices, quantity, design_options, quantity_options, pricing_table, portfolios });
   } catch (err) {
     next(err);
   }

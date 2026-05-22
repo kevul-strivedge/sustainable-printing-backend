@@ -262,6 +262,19 @@ export const ptDeliveryZones = mysqlTable('pt_delivery_zones', {
   zoneName: varchar('zone_name', { length: 128 }),
 });
 
+export const ptDeliveryWeights = mysqlTable('pt_delivery_weights', {
+  id:        int('id').autoincrement().primaryKey(),
+  minWeight: float('min_weight').notNull().default(0),
+  maxWeight: float('max_weight').notNull().default(0),
+});
+
+export const ptDeliveryPostcodesRanges = mysqlTable('pt_delivery_postcodes_ranges', {
+  id:            int('id').autoincrement().primaryKey(),
+  zoneId:        int('zone_id').notNull().default(0),
+  rangeBegining: int('range_begining').notNull().default(0),
+  rangeFinish:   int('range_finish').notNull().default(0),
+});
+
 export const ptDeliveryPrices = mysqlTable('pt_delivery_prices', {
   id:       int('id').autoincrement().primaryKey(),
   zoneId:   int('zone_id').notNull().default(0),
@@ -279,4 +292,32 @@ export const ptQuoteArtworks = mysqlTable('pt_quote_artworks', {
   extension:       varchar('extension', { length: 32 }).notNull().default(''),
   selectedArtwork: tinyint('selected_artwork').notNull().default(0),
   selectedProof:   tinyint('selected_proof').notNull().default(0),
+});
+
+// ─── Standardised Quantity Tiers ──────────────────────────────────────────────
+// pt_quantities is a flat global lookup (id → quantity) — distinct from
+// pt_product_quantities which is per-product. pt_finish_prices.quantity_id
+// references THIS table (a quantity tier shared across all products).
+
+export const ptQuantities = mysqlTable('pt_quantities', {
+  id:       int('id').autoincrement().primaryKey(),
+  quantity: int('quantity').notNull().default(0),
+});
+
+// ─── Portfolio ────────────────────────────────────────────────────────────────
+// One row per product variant (e.g. Uncoated business cards vs Brown Kraft business
+// cards both link to parent_product_id = 2). Carries the marketing title/description
+// shown when a paper-type tile is selected on the old Laravel site.
+
+export const ptPortfolio = mysqlTable('pt_portfolio', {
+  id:              int('id').autoincrement().primaryKey(),
+  memberId:        int('member_id').default(0),
+  productId:       int('product_id'),
+  parentProductId: int('parent_product_id'),
+  published:       tinyint('published').default(0),
+  title:           varchar('title', { length: 255 }),
+  title2:          varchar('title2', { length: 255 }),
+  description:     text('description'),
+  description1:    text('description1'),
+  description2:    text('description2'),
 });
