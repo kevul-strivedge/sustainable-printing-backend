@@ -8,6 +8,7 @@ import quoteRoutes from './quoteRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
 import customQuoteRoutes from './customQuoteRoutes.js';
 import samplePackRoutes from './samplePackRoutes.js';
+import deliveryRoutes from './deliveryRoutes.js';
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use('/quotes', quoteRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/custom-quotes', customQuoteRoutes);
 router.use('/sample-pack', samplePackRoutes);
+router.use('/delivery', deliveryRoutes);
 
 export default router;

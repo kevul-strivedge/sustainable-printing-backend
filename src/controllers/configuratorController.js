@@ -106,13 +106,14 @@ export const getProductConfig = async (req, res, next) => {
         .where(eq(ptProductQuantities.productId, productId))
         .orderBy(ptProductQuantities.quantity),
 
-      // Full pricing table — all (kind, quantity, formatId, stockId, price) rows
+      // Full pricing table — all (kind, quantity, formatId, stockId, price, estimatedWeight) rows
       db.select({
-        kind:     ptProductQuantities.kind,
-        quantity: ptProductQuantities.quantity,
-        formatId: ptProductPricing.formatId,
-        stockId:  ptProductPricing.stockId,
-        price:    ptProductPricing.printtogetherPrice,
+        kind:            ptProductQuantities.kind,
+        quantity:        ptProductQuantities.quantity,
+        formatId:        ptProductPricing.formatId,
+        stockId:         ptProductPricing.stockId,
+        price:           ptProductPricing.printtogetherPrice,
+        estimatedWeight: ptProductPricing.estimatedWeight,
       })
         .from(ptProductPricing)
         .innerJoin(ptProductQuantities, eq(ptProductPricing.productQuantityId, ptProductQuantities.id))

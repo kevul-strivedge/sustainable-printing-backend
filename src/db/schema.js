@@ -262,6 +262,19 @@ export const ptDeliveryZones = mysqlTable('pt_delivery_zones', {
   zoneName: varchar('zone_name', { length: 128 }),
 });
 
+export const ptDeliveryWeights = mysqlTable('pt_delivery_weights', {
+  id:        int('id').autoincrement().primaryKey(),
+  minWeight: float('min_weight').notNull().default(0),
+  maxWeight: float('max_weight').notNull().default(0),
+});
+
+export const ptDeliveryPostcodesRanges = mysqlTable('pt_delivery_postcodes_ranges', {
+  id:            int('id').autoincrement().primaryKey(),
+  zoneId:        int('zone_id').notNull().default(0),
+  rangeBegining: int('range_begining').notNull().default(0),
+  rangeFinish:   int('range_finish').notNull().default(0),
+});
+
 export const ptDeliveryPrices = mysqlTable('pt_delivery_prices', {
   id:       int('id').autoincrement().primaryKey(),
   zoneId:   int('zone_id').notNull().default(0),
