@@ -293,3 +293,21 @@ export const ptQuoteArtworks = mysqlTable('pt_quote_artworks', {
   selectedArtwork: tinyint('selected_artwork').notNull().default(0),
   selectedProof:   tinyint('selected_proof').notNull().default(0),
 });
+
+// ─── Portfolio ────────────────────────────────────────────────────────────────
+// One row per product variant (e.g. Uncoated business cards vs Brown Kraft business
+// cards both link to parent_product_id = 2). Carries the marketing title/description
+// shown when a paper-type tile is selected on the old Laravel site.
+
+export const ptPortfolio = mysqlTable('pt_portfolio', {
+  id:              int('id').autoincrement().primaryKey(),
+  memberId:        int('member_id').default(0),
+  productId:       int('product_id'),
+  parentProductId: int('parent_product_id'),
+  published:       tinyint('published').default(0),
+  title:           varchar('title', { length: 255 }),
+  title2:          varchar('title2', { length: 255 }),
+  description:     text('description'),
+  description1:    text('description1'),
+  description2:    text('description2'),
+});
