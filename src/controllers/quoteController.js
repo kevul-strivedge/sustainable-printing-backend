@@ -3,7 +3,9 @@ import { ptMembers, ptQuotes, ptQuoteArtworks, ptProducts } from '../db/schema.j
 import { eq, desc, count } from 'drizzle-orm';
 import { success, error } from '../utils/apiResponse.js';
 import jwt from 'jsonwebtoken';
-import { sendMail, invoiceEmailHtml } from '../utils/mailer.js';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+import { sendMail, invoiceEmailHtml, guestCredentialsEmailHtml } from '../utils/mailer.js';
 import { buildQuotePdf } from '../utils/quotePdf.js';
 import { buildInvoicePdf, generateInvoicePdfBuffer } from '../utils/invoicePdf.js';
 
@@ -110,36 +112,72 @@ export async function submitQuote(req, res) {
     }
 
     if (!memberId) {
-      const [memberResult] = await db.insert(ptMembers).values({
-        firstName,
-        lastName,
-        businessname: company || '',
-        address:      address || '',
-        suburb:       suburb || '',
-        state:        state || '',
-        postcode:     postcode || '',
-        email,
-        phone:        phone || '',
-        status:       'Pending',
-        created:      now,
-        createdAt:    now,
-        updatedAt:    now,
-        name:                '',
-        password:            '',
-        passwordToken:       '',
-        rememberToken:       '',
-        invoiceBusinessname: '',
-        invoiceFirstName:    '',
-        invoiceLastName:     '',
-        invoiceAddress:      '',
-        invoiceSuburb:       '',
-        invoiceState:        '',
-        invoicePostcode:     '',
-        invoiceEmail:        '',
-        invoicePhone:        '',
-        invoiceMobile:       '',
-      });
-      memberId = memberResult.insertId;
+      // Guest checkout — look up an existing pt_members row with this email FIRST.
+      // If found, reuse it (don't overwrite their password). If not, auto-create
+      // an account with a UUIDv4 password (matches Laravel ProductController.php:327)
+      // and email the plaintext credentials so the customer can log in afterwards.
+      const [existing] = await db
+        .select({ id: ptMembers.id })
+        .from(ptMembers)
+        .where(eq(ptMembers.email, email))
+        .limit(1);
+
+      if (existing) {
+        memberId = existing.id;
+        // Refresh their delivery details from this order (same as the
+        // authenticated-user branch below).
+        await db.update(ptMembers).set({
+          businessname: company || '',
+          address:      address || '',
+          suburb:       suburb || '',
+          state:        state || '',
+          postcode:     postcode || '',
+          phone:        phone || '',
+          updatedAt:    now,
+        }).where(eq(ptMembers.id, memberId));
+      } else {
+        const plainPassword  = crypto.randomUUID();              // 36-char UUIDv4 — Laravel parity
+        const hashedPassword = await bcrypt.hash(plainPassword, 12);
+
+        const [memberResult] = await db.insert(ptMembers).values({
+          firstName,
+          lastName,
+          name:                `${firstName} ${lastName}`.trim(),
+          email,
+          phone:               phone || '',
+          businessname:        company || '',
+          address:             address || '',
+          suburb:              suburb || '',
+          state:               state || '',
+          postcode:            postcode || '',
+          password:            hashedPassword,
+          passwordToken:       plainPassword,
+          rememberToken:       '',
+          status:              'Pending',
+          contactType:         'sustainableprintingco',
+          created:             now,
+          createdAt:           now,
+          updatedAt:           now,
+          invoiceBusinessname: '',
+          invoiceFirstName:    '',
+          invoiceLastName:     '',
+          invoiceAddress:      '',
+          invoiceSuburb:       '',
+          invoiceState:        '',
+          invoicePostcode:     '',
+          invoiceEmail:        '',
+          invoicePhone:        '',
+          invoiceMobile:       '',
+        });
+        memberId = memberResult.insertId;
+
+        // Best-effort credentials email — MUST NOT block the order if SMTP is down.
+        sendMail({
+          to:      email,
+          subject: 'Your Sustainable Printing Co. account is ready',
+          html:    guestCredentialsEmailHtml({ firstName, email, password: plainPassword }),
+        }).catch((err) => console.error('[submitQuote] credentials email failed:', err));
+      }
     } else {
       // Update existing member's delivery details from this order
       await db.update(ptMembers).set({
