@@ -62,6 +62,23 @@ export const login = async (req, res, next) => {
     const match = await bcrypt.compare(password, member.password);
     if (!match) return error(res, 'Invalid credentials', 401);
 
+    // Block accounts the Laravel admin has explicitly disabled.
+    // Pending/Confirmed/Active all stay login-able (matches Laravel behaviour).
+    if (member.status === 'Suspended') {
+      return error(res, 'This account has been suspended. Please contact support.', 403);
+    }
+
+    // Opportunistic rehash: when a Laravel-era `$2y$10$…` (or our older `$2a$10$…`)
+    // hash compares successfully, silently rewrite it with our current cost-12 format.
+    // Each user transparently upgrades on their next login. Failure here must NEVER
+    // block login — wrap in try/catch and swallow.
+    if (member.password.startsWith('$2y$') || member.password.startsWith('$2a$10$')) {
+      try {
+        const upgraded = await bcrypt.hash(password, 12);
+        await db.update(ptMembers).set({ password: upgraded }).where(eq(ptMembers.id, member.id));
+      } catch { /* best-effort upgrade — ignore failures */ }
+    }
+
     const token = generateToken(member.id);
     return success(res, {
       token,
