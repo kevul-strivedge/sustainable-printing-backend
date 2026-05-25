@@ -1,6 +1,7 @@
 import { db } from '../config/db.js';
 import { ptMembers } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { success, error } from '../utils/apiResponse.js';
@@ -46,6 +47,88 @@ export const register = async (req, res, next) => {
 
     const token = generateToken(result.insertId);
     return success(res, { token }, 'Registration successful', 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getMe = async (req, res, next) => {
+  try {
+    const rows = await db
+      .select({
+        id: ptMembers.id,
+        firstName: ptMembers.firstName,
+        lastName: ptMembers.lastName,
+        businessname: ptMembers.businessname,
+        address: ptMembers.address,
+        suburb: ptMembers.suburb,
+        state: ptMembers.state,
+        postcode: ptMembers.postcode,
+        email: ptMembers.email,
+        notes: ptMembers.notes,
+        phone: ptMembers.phone,
+        mobile: ptMembers.mobile,
+        businessTypeId: ptMembers.businessTypeId,
+        heardFromId: ptMembers.heardFromId,
+      })
+      .from(ptMembers)
+      .where(eq(ptMembers.id, req.user.id));
+
+    if (!rows.length) return error(res, 'User not found', 404);
+
+    const member = rows[0];
+
+    const [businessTypes] = await db.execute(
+      sql`SELECT id, business_type_name AS name FROM pt_business_types ORDER BY id`
+    );
+    const [heardFromList] = await db.execute(
+      sql`SELECT id, heard_from_name AS name FROM pt_heard_from ORDER BY id`
+    );
+
+    return success(res, {
+      ...member,
+      website: member.notes ?? '',
+      businessTypes,
+      heardFromList,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateMe = async (req, res, next) => {
+  try {
+    const {
+      firstName, lastName, businessname, address, suburb,
+      state, postcode, website, phone, mobile,
+      businessTypeId, heardFromId,
+    } = req.body;
+
+    if (!firstName || !lastName || !businessname || !address || !suburb || !postcode) {
+      return error(res, 'Required fields are missing', 400);
+    }
+
+    await db
+      .update(ptMembers)
+      .set({
+        firstName,
+        lastName,
+        name: `${firstName} ${lastName}`.trim(),
+        businessname,
+        address,
+        suburb,
+        state: state ?? '',
+        postcode,
+        notes: website ?? '',
+        phone: phone ?? '',
+        mobile: mobile ?? '',
+        businessTypeId: businessTypeId ? Number(businessTypeId) : null,
+        heardFromId: heardFromId ? Number(heardFromId) : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(ptMembers.id, req.user.id));
+
+    return success(res, null, 'Profile updated successfully');
   } catch (err) {
     next(err);
   }
